@@ -10,22 +10,44 @@ from waitress import serve
 from werkzeug.datastructures import MultiDict
 import psycopg2
 from psycopg2.extras import DictCursor
-
+import boto3 # Biblioteca da AWS
 
 # --- Configuração da Aplicação ---
-app = Flask(__name__)
-# As chaves agora vêm de variáveis de ambiente para maior segurança
-app.secret_key = os.environ.get('SECRET_KEY', 'fallback_secret_key_for_local_dev')
-app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL') # URL do PostgreSQL do Render
-app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'xlsx', 'xls'}
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# O nome 'application' é o padrão que o Elastic Beanstalk procura.
+application = app = Flask(__name__)
+
+app.secret_key = os.environ.get('SECRET_KEY')
+app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL')
+
+# --- Configuração do S3 ---
+S3_BUCKET = os.environ.get("S3_BUCKET")
+S3_LOCATION = os.environ.get("S3_LOCATION")
+# As credenciais são lidas automaticamente pelo Boto3 a partir das variáveis de ambiente padrão do EB
+s3 = boto3.client("s3")
+
+def upload_file_to_s3(file, bucket_name, acl="public-read"):
+    """
+    Função para fazer o upload de um ficheiro para um bucket S3
+    """
+    try:
+        s3.upload_fileobj(
+            file,
+            bucket_name,
+            file.filename,
+            ExtraArgs={
+                "ACL": acl,
+                "ContentType": file.content_type
+            }
+        )
+    except Exception as e:
+        print("Erro no upload para o S3: ", e)
+        return {"error": str(e)}
+    return {"url": f"{S3_LOCATION}{file.filename}"}
 
 
 # --- Funções de Banco de Dados (PostgreSQL) ---
 def get_db():
     if 'db' not in g:
-        # Conecta-se ao PostgreSQL usando a URL da variável de ambiente
         g.db = psycopg2.connect(app.config['DATABASE_URL'])
     return g.db
 
@@ -36,96 +58,50 @@ def close_connection(exception):
         db.close()
 
 def init_db():
-    # O schema SQL agora está dentro do código para evitar FileNotFoundError no deploy.
     SCHEMA_SQL = """
         CREATE TABLE IF NOT EXISTS grupos (
-            id SERIAL PRIMARY KEY,
-            nome TEXT NOT NULL UNIQUE
+            id SERIAL PRIMARY KEY, nome TEXT NOT NULL UNIQUE
         );
         CREATE TABLE IF NOT EXISTS lojas (
-            id SERIAL PRIMARY KEY, 
-            razao_social TEXT NOT NULL UNIQUE,
-            bandeira TEXT, 
-            cnpj TEXT UNIQUE, 
-            av_rua TEXT, 
-            cidade TEXT, 
-            uf TEXT,
-            grupo_id INTEGER,
-            FOREIGN KEY (grupo_id) REFERENCES grupos(id)
+            id SERIAL PRIMARY KEY, razao_social TEXT NOT NULL UNIQUE, bandeira TEXT, cnpj TEXT UNIQUE, av_rua TEXT, cidade TEXT, uf TEXT,
+            grupo_id INTEGER, FOREIGN KEY (grupo_id) REFERENCES grupos(id)
         );
         CREATE TABLE IF NOT EXISTS usuarios (
-            id SERIAL PRIMARY KEY, 
-            usuario TEXT NOT NULL UNIQUE,
-            senha_hash TEXT NOT NULL, 
-            tipo TEXT NOT NULL,
-            nome_completo TEXT, 
-            cpf TEXT UNIQUE, 
-            telefone TEXT UNIQUE,
-            cidade TEXT, 
-            uf TEXT, 
-            ativo INTEGER DEFAULT 1
+            id SERIAL PRIMARY KEY, usuario TEXT NOT NULL UNIQUE, senha_hash TEXT NOT NULL, tipo TEXT NOT NULL, nome_completo TEXT, 
+            cpf TEXT UNIQUE, telefone TEXT UNIQUE, cidade TEXT, uf TEXT, ativo INTEGER DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS promotora_lojas (
-            id SERIAL PRIMARY KEY,
-            usuario_id INTEGER NOT NULL,
-            loja_id INTEGER NOT NULL,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios (id) ON DELETE CASCADE,
-            FOREIGN KEY (loja_id) REFERENCES lojas (id) ON DELETE CASCADE,
+            id SERIAL PRIMARY KEY, usuario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id) ON DELETE CASCADE, FOREIGN KEY (loja_id) REFERENCES lojas (id) ON DELETE CASCADE,
             UNIQUE (usuario_id, loja_id)
         );
         CREATE TABLE IF NOT EXISTS campos_relatorio (
-            id SERIAL PRIMARY KEY,
-            grupo_id INTEGER NOT NULL,
-            nome_campo TEXT NOT NULL,
-            label_campo TEXT NOT NULL,
+            id SERIAL PRIMARY KEY, grupo_id INTEGER NOT NULL, nome_campo TEXT NOT NULL, label_campo TEXT NOT NULL,
             FOREIGN KEY (grupo_id) REFERENCES grupos(id)
         );
         CREATE TABLE IF NOT EXISTS relatorios (
-            id SERIAL PRIMARY KEY, 
-            usuario_id INTEGER NOT NULL, 
-            loja_id INTEGER NOT NULL,
-            data DATE NOT NULL, 
-            data_hora TIMESTAMP NOT NULL,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), 
-            FOREIGN KEY (loja_id) REFERENCES lojas(id)
+            id SERIAL PRIMARY KEY, usuario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, data DATE NOT NULL, data_hora TIMESTAMP NOT NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), FOREIGN KEY (loja_id) REFERENCES lojas(id)
         );
         CREATE TABLE IF NOT EXISTS dados_relatorio (
-            id SERIAL PRIMARY KEY,
-            relatorio_id INTEGER NOT NULL,
-            campo_id INTEGER NOT NULL,
-            valor TEXT,
-            FOREIGN KEY (relatorio_id) REFERENCES relatorios(id),
-            FOREIGN KEY (campo_id) REFERENCES campos_relatorio(id)
+            id SERIAL PRIMARY KEY, relatorio_id INTEGER NOT NULL, campo_id INTEGER NOT NULL, valor TEXT,
+            FOREIGN KEY (relatorio_id) REFERENCES relatorios(id), FOREIGN KEY (campo_id) REFERENCES campos_relatorio(id)
         );
         CREATE TABLE IF NOT EXISTS notas_fiscais (
-            id SERIAL PRIMARY KEY, 
-            usuario_id INTEGER NOT NULL, 
-            loja_id INTEGER NOT NULL,
-            nota_img TEXT NOT NULL, 
-            data_hora TIMESTAMP NOT NULL,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), 
-            FOREIGN KEY (loja_id) REFERENCES lojas(id)
+            id SERIAL PRIMARY KEY, usuario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, nota_img TEXT NOT NULL, data_hora TIMESTAMP NOT NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), FOREIGN KEY (loja_id) REFERENCES lojas(id)
         );
         CREATE TABLE IF NOT EXISTS checkins (
-            id SERIAL PRIMARY KEY,
-            usuario_id INTEGER NOT NULL, 
-            loja_id INTEGER NOT NULL,
-            tipo TEXT NOT NULL,
-            data_hora TIMESTAMP NOT NULL,
-            latitude REAL, 
-            longitude REAL, 
-            imagem_path TEXT NOT NULL,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), 
-            FOREIGN KEY (loja_id) REFERENCES lojas(id)
+            id SERIAL PRIMARY KEY, usuario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, data_hora TIMESTAMP NOT NULL,
+            latitude REAL, longitude REAL, imagem_path TEXT NOT NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id), FOREIGN KEY (loja_id) REFERENCES lojas(id)
         );
     """
     with app.app_context():
         db = get_db()
         cursor = db.cursor()
-        # Verifica se a tabela 'usuarios' existe no PostgreSQL
         cursor.execute("SELECT to_regclass('public.usuarios');")
         if cursor.fetchone()[0] is None:
-            # Executa o schema diretamente da string, eliminando a dependência do ficheiro .sql
             cursor.execute(SCHEMA_SQL)
             master_pass_hash = generate_password_hash('admin')
             cursor.execute("INSERT INTO usuarios (usuario, senha_hash, tipo, nome_completo) VALUES (%s, %s, %s, %s)",
@@ -141,24 +117,18 @@ def login():
         senha_input = request.form.get('senha', '')
         db = get_db()
         cursor = db.cursor(cursor_factory=DictCursor)
-
-        # Tenta fazer login como promotora primeiro
         cursor.execute("SELECT * FROM usuarios WHERE telefone = %s AND tipo = 'promotora'", (login_input,))
         user_db = cursor.fetchone()
-        
         if user_db and check_password_hash(user_db['senha_hash'], senha_input):
             if not user_db['ativo']:
                 flash('Este usuário está inativo.', 'warning')
                 return redirect(url_for('login'))
-            
             session.clear()
             session['user_id'] = user_db['id']
             session['user_name'] = user_db['nome_completo']
             session['user_type'] = user_db['tipo']
             cursor.close()
             return redirect(url_for('formulario'))
-
-        # Se o login da promotora falhar, tenta como master
         cursor.execute("SELECT * FROM usuarios WHERE usuario = %s AND tipo = 'master'", (login_input,))
         user_db = cursor.fetchone()
         if user_db and check_password_hash(user_db['senha_hash'], senha_input):
@@ -168,23 +138,15 @@ def login():
             session['user_type'] = user_db['tipo']
             cursor.close()
             return redirect(url_for('admin_redirect'))
-
         cursor.close()
         flash('Login ou senha inválidos.', 'danger')
         return redirect(url_for('login'))
-        
     return render_template('login.html', title="Login")
-
-# --- ÁREA DA PROMOTORA ---
 
 def get_promotora_lojas(usuario_id):
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
-    query = """
-        SELECT l.id, l.razao_social, l.cnpj, l.grupo_id
-        FROM lojas l JOIN promotora_lojas pl ON l.id = pl.loja_id
-        WHERE pl.usuario_id = %s ORDER BY l.razao_social
-    """
+    query = "SELECT l.id, l.razao_social, l.cnpj, l.grupo_id FROM lojas l JOIN promotora_lojas pl ON l.id = pl.loja_id WHERE pl.usuario_id = %s ORDER BY l.razao_social"
     cursor.execute(query, (usuario_id,))
     lojas = cursor.fetchall()
     cursor.close()
@@ -192,60 +154,41 @@ def get_promotora_lojas(usuario_id):
 
 @app.route('/formulario', methods=['GET', 'POST'])
 def formulario():
-    if 'user_type' not in session or session['user_type'] != 'promotora': 
-        return redirect(url_for('login'))
-    
+    if 'user_type' not in session or session['user_type'] != 'promotora': return redirect(url_for('login'))
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     usuario_id = session['user_id']
-    
     cursor.execute("SELECT * FROM usuarios WHERE id = %s", (usuario_id,))
     user = cursor.fetchone()
     lojas_associadas = get_promotora_lojas(usuario_id)
-
     if not lojas_associadas:
         flash("Você não está associada a nenhuma loja. Contacte o administrador.", "warning")
         return render_template('formulario.html', user=user, lojas=[], campos=[], historico_relatorios=[])
-
     if request.method == 'POST':
         loja_id_selecionada = request.form.get('loja_id')
         if not loja_id_selecionada:
             flash("É necessário selecionar uma loja para enviar o relatório.", "danger")
             return redirect(url_for('formulario'))
-
         cursor.execute("SELECT grupo_id FROM lojas WHERE id = %s", (loja_id_selecionada,))
         loja_selecionada = cursor.fetchone()
         if not loja_selecionada or not loja_selecionada['grupo_id']:
             flash("A loja selecionada não pertence a um grupo com relatório configurado.", "warning")
             return redirect(url_for('formulario'))
-
         cursor.execute("SELECT * FROM campos_relatorio WHERE grupo_id = %s", (loja_selecionada['grupo_id'],))
         campos = cursor.fetchall()
-        
-        cursor.execute(
-            "INSERT INTO relatorios (usuario_id, loja_id, data, data_hora) VALUES (%s, %s, %s, %s) RETURNING id",
-            (usuario_id, loja_id_selecionada, str(datetime.today().date()), datetime.now())
-        )
+        cursor.execute("INSERT INTO relatorios (usuario_id, loja_id, data, data_hora) VALUES (%s, %s, %s, %s) RETURNING id", (usuario_id, loja_id_selecionada, str(datetime.today().date()), datetime.now()))
         relatorio_id = cursor.fetchone()['id']
-
         for campo in campos:
             valor_enviado = request.form.get(f"campo_{campo['id']}")
             if valor_enviado:
-                cursor.execute(
-                    "INSERT INTO dados_relatorio (relatorio_id, campo_id, valor) VALUES (%s, %s, %s)",
-                    (relatorio_id, campo['id'], valor_enviado)
-                )
-        
+                cursor.execute("INSERT INTO dados_relatorio (relatorio_id, campo_id, valor) VALUES (%s, %s, %s)", (relatorio_id, campo['id'], valor_enviado))
         db.commit()
         cursor.close()
         flash("Relatório enviado com sucesso!", "success")
         return redirect(url_for('formulario'))
-
-    # Lógica para GET
     loja_id_para_campos = request.args.get('loja_id')
     if not loja_id_para_campos and lojas_associadas:
         loja_id_para_campos = lojas_associadas[0]['id']
-
     campos = []
     if loja_id_para_campos:
         cursor.execute("SELECT grupo_id FROM lojas WHERE id = %s", (loja_id_para_campos,))
@@ -253,11 +196,7 @@ def formulario():
         if loja_atual and loja_atual['grupo_id']:
             cursor.execute("SELECT * FROM campos_relatorio WHERE grupo_id = %s ORDER BY id", (loja_atual['grupo_id'],))
             campos = cursor.fetchall()
-    
-    historico_query = """
-        SELECT r.id, r.data_hora, l.razao_social FROM relatorios r JOIN lojas l ON r.loja_id = l.id
-        WHERE r.usuario_id = %s ORDER BY r.data_hora DESC LIMIT 10
-    """
+    historico_query = "SELECT r.id, r.data_hora, l.razao_social FROM relatorios r JOIN lojas l ON r.loja_id = l.id WHERE r.usuario_id = %s ORDER BY r.data_hora DESC LIMIT 10"
     cursor.execute(historico_query, (usuario_id,))
     reports = cursor.fetchall()
     historico_relatorios = []
@@ -265,106 +204,84 @@ def formulario():
         cursor.execute("SELECT cr.label_campo, dr.valor FROM dados_relatorio dr JOIN campos_relatorio cr ON dr.campo_id = cr.id WHERE dr.relatorio_id = %s", (report['id'],))
         dados = cursor.fetchall()
         historico_relatorios.append({'info': report, 'dados': dados})
-    
     cursor.close()
     return render_template('formulario.html', user=user, lojas=lojas_associadas, campos=campos, loja_selecionada_id=int(loja_id_para_campos) if loja_id_para_campos else None, historico_relatorios=historico_relatorios, title="Relatório Diário")
-
 
 @app.route('/enviar-nota', methods=['GET', 'POST'])
 def enviar_nota():
     if 'user_type' not in session or session['user_type'] != 'promotora': return redirect(url_for('login'))
-    
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     usuario_id = session['user_id']
     lojas_associadas = get_promotora_lojas(usuario_id)
-
     if not lojas_associadas:
         flash("Você não está associada a nenhuma loja para enviar notas.", "warning")
         return render_template('enviar_nota.html', lojas=[], notas_enviadas=[])
-
     if request.method == 'POST':
         loja_id_selecionada = request.form.get('loja_id')
         nota_file = request.files.get('nota')
-
         if not loja_id_selecionada or not nota_file:
             flash("É necessário selecionar uma loja e um arquivo.", "danger")
             return redirect(url_for('enviar_nota'))
-
-        if '.' in nota_file.filename and nota_file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS:
-            cursor.execute("SELECT cnpj FROM lojas WHERE id = %s", (loja_id_selecionada,))
-            loja_selecionada = cursor.fetchone()
-            
-            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
-            cnpj = loja_selecionada['cnpj'] if loja_selecionada and loja_selecionada['cnpj'] else 'sem_cnpj'
-            extensao = nota_file.filename.rsplit('.', 1)[1].lower()
-            novo_nome = f"{cnpj}_{timestamp}.{extensao}"
-            fn_n = secure_filename(novo_nome)
-            
-            nota_file.save(os.path.join(app.config['UPLOAD_FOLDER'], fn_n))
-            cursor.execute(
-                "INSERT INTO notas_fiscais (usuario_id, loja_id, nota_img, data_hora) VALUES (%s, %s, %s, %s)",
-                (usuario_id, loja_id_selecionada, fn_n, datetime.now())
-            )
-            db.commit()
-            flash('Nota fiscal enviada com sucesso!', 'success')
+        cursor.execute("SELECT cnpj FROM lojas WHERE id = %s", (loja_id_selecionada,))
+        loja_selecionada = cursor.fetchone()
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
+        cnpj = loja_selecionada['cnpj'] if loja_selecionada and loja_selecionada['cnpj'] else 'sem_cnpj'
+        extensao = nota_file.filename.rsplit('.', 1)[1].lower()
+        novo_nome = f"notas/{cnpj}_{timestamp}.{extensao}"
+        nota_file.filename = secure_filename(novo_nome)
+        output = upload_file_to_s3(nota_file, S3_BUCKET)
+        if "error" in output:
+            flash(f"Erro ao enviar ficheiro: {output['error']}", "danger")
             return redirect(url_for('enviar_nota'))
-
+        cursor.execute("INSERT INTO notas_fiscais (usuario_id, loja_id, nota_img, data_hora) VALUES (%s, %s, %s, %s)", (usuario_id, loja_id_selecionada, nota_file.filename, datetime.now()))
+        db.commit()
+        flash('Nota fiscal enviada com sucesso!', 'success')
+        return redirect(url_for('enviar_nota'))
     cursor.execute("SELECT nf.*, l.razao_social FROM notas_fiscais nf JOIN lojas l ON nf.loja_id = l.id WHERE nf.usuario_id = %s ORDER BY nf.data_hora DESC", (usuario_id,))
     notas_enviadas = cursor.fetchall()
     cursor.close()
-    return render_template('enviar_nota.html', lojas=lojas_associadas, notas_enviadas=notas_enviadas, title="Enviar Nota Fiscal")
-
+    return render_template('enviar_nota.html', lojas=lojas_associadas, notas_enviadas=notas_enviadas, s3_location=S3_LOCATION, title="Enviar Nota Fiscal")
 
 @app.route('/checkin', methods=['GET', 'POST'])
 def checkin():
-    if 'user_type' not in session or session['user_type'] != 'promotora':
-        return redirect(url_for('login'))
-    
+    if 'user_type' not in session or session['user_type'] != 'promotora': return redirect(url_for('login'))
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     usuario_id = session['user_id']
     lojas_associadas = get_promotora_lojas(usuario_id)
-
     if not lojas_associadas:
         flash("Você não está associada a nenhuma loja para fazer check-in.", "warning")
         return render_template('checkin.html', lojas=[], registros=[])
-
     if request.method == 'POST':
         loja_id_selecionada = request.form.get('loja_id')
         tipo = request.form.get('tipo')
         latitude = request.form.get('latitude')
         longitude = request.form.get('longitude')
         imagem_file = request.files.get('imagem')
-
         if not all([loja_id_selecionada, tipo, imagem_file]):
             flash('Todos os campos são obrigatórios.', 'warning')
             return redirect(url_for('checkin'))
-            
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         extensao = imagem_file.filename.rsplit('.', 1)[1].lower()
-        nome_arquivo = secure_filename(f"{tipo}_{usuario_id}_{timestamp}.{extensao}")
-        imagem_file.save(os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo))
-        
-        cursor.execute("""
-            INSERT INTO checkins (usuario_id, loja_id, tipo, data_hora, latitude, longitude, imagem_path)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (usuario_id, loja_id_selecionada, tipo, datetime.now(), latitude, longitude, nome_arquivo))
+        nome_arquivo = f"checkins/{tipo}_{usuario_id}_{timestamp}.{extensao}"
+        imagem_file.filename = secure_filename(nome_arquivo)
+        output = upload_file_to_s3(imagem_file, S3_BUCKET)
+        if "error" in output:
+            flash(f"Erro ao enviar imagem: {output['error']}", "danger")
+            return redirect(url_for('checkin'))
+        cursor.execute("INSERT INTO checkins (usuario_id, loja_id, tipo, data_hora, latitude, longitude, imagem_path) VALUES (%s, %s, %s, %s, %s, %s, %s)", (usuario_id, loja_id_selecionada, tipo, datetime.now(), latitude, longitude, imagem_file.filename))
         db.commit()
         flash(f'{tipo.capitalize()} registado com sucesso!', 'success')
         return redirect(url_for('checkin'))
-
     cursor.execute("SELECT c.*, l.razao_social FROM checkins c JOIN lojas l ON c.loja_id = l.id WHERE c.usuario_id = %s ORDER BY c.data_hora DESC", (usuario_id,))
     registros = cursor.fetchall()
     cursor.close()
-    return render_template('checkin.html', lojas=lojas_associadas, registros=registros, title="Check-in / Checkout")
-
+    return render_template('checkin.html', lojas=lojas_associadas, registros=registros, s3_location=S3_LOCATION, title="Check-in / Checkout")
 
 @app.route('/obrigado')
 def obrigado():
     return '<p style="font-family: sans-serif; text-align: center; margin-top: 50px; font-size: 1.2em;">Operação realizada com sucesso!</p>'
-
-# --- ÁREA DO ADMINISTRADOR ---
 
 @app.route('/admin')
 def admin_redirect():
@@ -377,7 +294,6 @@ def dashboard():
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     today = datetime.now().strftime('%Y-%m-%d')
-    
     cursor.execute("SELECT COUNT(id) as total FROM usuarios WHERE tipo = 'promotora' AND ativo = 1")
     total_promotoras = cursor.fetchone()['total']
     cursor.execute("SELECT COUNT(id) as total FROM lojas")
@@ -386,12 +302,10 @@ def dashboard():
     relatorios_hoje = cursor.fetchone()['total']
     cursor.execute("SELECT COUNT(id) as total FROM checkins WHERE data_hora::date = %s", (today,))
     checkins_hoje = cursor.fetchone()['total']
-    
     cursor.execute("SELECT data_hora::date as dia, COUNT(id) as total FROM relatorios WHERE data_hora::date >= NOW() - INTERVAL '6 days' GROUP BY dia ORDER BY dia ASC")
     reports_by_day = cursor.fetchall()
     cursor.execute("SELECT tipo, COUNT(id) as total FROM checkins WHERE data_hora::date = %s GROUP BY tipo", (today,))
     checkins_by_type = cursor.fetchall()
-    
     report_labels = [r['dia'].strftime('%d/%m') for r in reports_by_day]
     report_data = [r['total'] for r in reports_by_day]
     checkin_labels = [r['tipo'].capitalize() for r in checkins_by_type]
@@ -401,25 +315,18 @@ def dashboard():
 
 @app.route('/admin/gerenciamento')
 def gerenciamento():
-    if 'user_type' not in session or session['user_type'] != 'master':
-        return redirect(url_for('login'))
-
+    if 'user_type' not in session or session['user_type'] != 'master': return redirect(url_for('login'))
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     cursor.execute("SELECT * FROM grupos ORDER BY nome")
     grupos = cursor.fetchall()
     cursor.execute("SELECT l.*, g.nome as grupo_nome FROM lojas l LEFT JOIN grupos g ON l.grupo_id = g.id ORDER BY l.razao_social")
     lojas_all = cursor.fetchall()
-    cursor.execute("""
-        SELECT u.*, COUNT(pl.loja_id) as total_lojas
-        FROM usuarios u LEFT JOIN promotora_lojas pl ON u.id = pl.usuario_id
-        WHERE u.tipo = 'promotora' GROUP BY u.id ORDER BY u.nome_completo
-    """)
+    cursor.execute("SELECT u.*, COUNT(pl.loja_id) as total_lojas FROM usuarios u LEFT JOIN promotora_lojas pl ON u.id = pl.usuario_id WHERE u.tipo = 'promotora' GROUP BY u.id ORDER BY u.nome_completo")
     promotoras = cursor.fetchall()
     cursor.close()
     return render_template('gerenciamento.html', title="Gerenciamento", lojas=lojas_all, promotoras=promotoras, grupos=grupos, lojas_all=lojas_all)
 
-# --- ROTAS DE GRUPOS E LOJAS ---
 @app.route('/admin/grupos')
 def gerenciar_grupos():
     if 'user_type' not in session or session['user_type'] != 'master': return redirect(url_for('login'))
@@ -483,8 +390,7 @@ def add_campo(id):
         nome_campo = label_campo.lower().replace(" ", "_")
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("INSERT INTO campos_relatorio (grupo_id, nome_campo, label_campo) VALUES (%s, %s, %s)",
-                   (id, nome_campo, label_campo))
+        cursor.execute("INSERT INTO campos_relatorio (grupo_id, nome_campo, label_campo) VALUES (%s, %s, %s)", (id, nome_campo, label_campo))
         db.commit()
         cursor.close()
         flash(f"Campo '{label_campo}' adicionado.", "success")
@@ -515,8 +421,7 @@ def add_loja():
     cursor = db.cursor()
     try:
         cursor.execute("INSERT INTO lojas (razao_social, bandeira, cnpj, av_rua, cidade, uf, grupo_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                   (request.form['razao_social'], request.form['bandeira'], request.form['cnpj'], 
-                    request.form['av_rua'], request.form['cidade'], request.form['uf'], request.form['grupo_id']))
+                   (request.form['razao_social'], request.form['bandeira'], request.form['cnpj'], request.form['av_rua'], request.form['cidade'], request.form['uf'], request.form['grupo_id']))
         db.commit()
         flash("Loja adicionada com sucesso!", "success")
     except psycopg2.IntegrityError:
@@ -534,13 +439,11 @@ def edit_loja(id):
     if request.method == 'POST':
         cursor_dml = db.cursor()
         cursor_dml.execute("UPDATE lojas SET razao_social = %s, bandeira = %s, cnpj = %s, av_rua = %s, cidade = %s, uf = %s, grupo_id = %s WHERE id = %s",
-                   (request.form['razao_social'], request.form['bandeira'], request.form['cnpj'], 
-                    request.form['av_rua'], request.form['cidade'], request.form['uf'], request.form['grupo_id'], id))
+                   (request.form['razao_social'], request.form['bandeira'], request.form['cnpj'], request.form['av_rua'], request.form['cidade'], request.form['uf'], request.form['grupo_id'], id))
         db.commit()
         cursor_dml.close()
         flash("Loja atualizada com sucesso!", "success")
         return redirect(url_for('gerenciamento'))
-    
     cursor.execute("SELECT * FROM lojas WHERE id = %s", (id,))
     loja = cursor.fetchone()
     cursor.execute("SELECT * FROM grupos ORDER BY nome")
@@ -580,28 +483,21 @@ def importar_lojas():
         flash(f'Erro ao processar a planilha: {e}', 'danger')
     return redirect(url_for('gerenciamento'))
 
-# --- ROTA DE RELATÓRIOS ATUALIZADA ---
 @app.route('/admin/relatorios', methods=['GET', 'POST'])
 def relatorios():
-    if 'user_type' not in session or session['user_type'] != 'master':
-        return redirect(url_for('login'))
-
+    if 'user_type' not in session or session['user_type'] != 'master': return redirect(url_for('login'))
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
-    
     cursor.execute("SELECT * FROM grupos ORDER BY nome")
     grupos = cursor.fetchall()
     cursor.execute("SELECT id, nome_completo FROM usuarios WHERE tipo = 'promotora' ORDER BY nome_completo")
     promotoras = cursor.fetchall()
     cursor.execute("SELECT id, razao_social FROM lojas ORDER BY razao_social")
     lojas = cursor.fetchall()
-
     if request.method == 'POST':
         active_tab = 'avancado'
     else:
         active_tab = request.args.get('tab', 'diario')
-
-    # Filtros Relatórios Diários
     filtros_diarios = {'grupo_id': request.args.get('filtro_grupo_id', ''), 'data': request.args.get('filtro_data', datetime.now().strftime('%Y-%m-%d'))}
     relatorios_diarios = []
     if filtros_diarios['grupo_id'] and filtros_diarios['data']:
@@ -612,15 +508,12 @@ def relatorios():
             cursor.execute("SELECT cr.label_campo, dr.valor FROM dados_relatorio dr JOIN campos_relatorio cr ON dr.campo_id = cr.id WHERE dr.relatorio_id = %s", (report['id'],))
             dados = cursor.fetchall()
             relatorios_diarios.append({'info': report, 'dados': dados})
-
-    # Filtros Relatórios Avançados
     filtros_avancados = MultiDict(request.form) if request.method == 'POST' else MultiDict(request.args)
     campos_disponiveis = []
     grupo_id_avancado = filtros_avancados.get('grupo_id')
     if grupo_id_avancado:
         cursor.execute("SELECT id, label_campo FROM campos_relatorio WHERE grupo_id = %s ORDER BY label_campo", (grupo_id_avancado,))
         campos_disponiveis = cursor.fetchall()
-
     resultados_avancados = []
     headers = []
     if request.method == 'POST' and filtros_avancados.getlist('campos'):
@@ -641,7 +534,6 @@ def relatorios():
             elif tipo_agregacao == 'media':
                 colunas_select.append(f"AVG(CASE WHEN dr.campo_id = {campo_id} THEN CAST(dr.valor AS REAL) END) AS \"{nome_coluna}_media\"")
                 headers.append(f"{nome_coluna} (Média)")
-        
         if colunas_select:
             query_base = f"SELECT u.nome_completo, l.razao_social, {', '.join(colunas_select)} FROM relatorios r JOIN usuarios u ON r.usuario_id = u.id JOIN lojas l ON r.loja_id = l.id JOIN dados_relatorio dr ON r.id = dr.relatorio_id"
             where_clauses = ["l.grupo_id = %s", "r.data BETWEEN %s AND %s"]
@@ -655,8 +547,6 @@ def relatorios():
             query_dinamica = query_base + " WHERE " + " AND ".join(where_clauses) + " GROUP BY u.id, l.id ORDER BY u.nome_completo"
             cursor.execute(query_dinamica, tuple(params))
             resultados_avancados = cursor.fetchall()
-
-    # LÓGICA PARA HISTÓRICO DE CHECK-INS
     filtros_checkins = {'promotora_id': request.args.get('filtro_checkin_promotora_id', ''), 'loja_id': request.args.get('filtro_checkin_loja_id', ''), 'data_inicio': request.args.get('filtro_checkin_data_inicio', (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')), 'data_fim': request.args.get('filtro_checkin_data_fim', datetime.now().strftime('%Y-%m-%d'))}
     query_checkins_base = "SELECT c.data_hora, c.tipo, c.latitude, c.longitude, c.imagem_path, u.nome_completo, l.razao_social FROM checkins c JOIN usuarios u ON c.usuario_id = u.id JOIN lojas l ON c.loja_id = l.id WHERE c.data_hora::date BETWEEN %s AND %s"
     params_checkins = [filtros_checkins['data_inicio'], filtros_checkins['data_fim']]
@@ -669,11 +559,9 @@ def relatorios():
     query_checkins_base += " ORDER BY c.data_hora DESC"
     cursor.execute(query_checkins_base, tuple(params_checkins))
     historico_checkins = cursor.fetchall()
-    
     cursor.close()
-    return render_template('relatorios.html', title="Relatórios", grupos=grupos, promotoras=promotoras, lojas=lojas, relatorios_diarios=relatorios_diarios, resultados_avancados=resultados_avancados, headers=headers, filtros_diarios=filtros_diarios, filtros_avancados=filtros_avancados, campos_disponiveis=campos_disponiveis, historico_checkins=historico_checkins, filtros_checkins=filtros_checkins, active_tab=active_tab)
+    return render_template('relatorios.html', title="Relatórios", grupos=grupos, promotoras=promotoras, lojas=lojas, relatorios_diarios=relatorios_diarios, resultados_avancados=resultados_avancados, headers=headers, filtros_diarios=filtros_diarios, filtros_avancados=filtros_avancados, campos_disponiveis=campos_disponiveis, historico_checkins=historico_checkins, filtros_checkins=filtros_checkins, active_tab=active_tab, s3_location=S3_LOCATION)
 
-# --- NOVAS ROTAS DE EXPORTAÇÃO ---
 @app.route('/admin/relatorios/exportar/diario')
 def exportar_relatorio_diario():
     if 'user_type' not in session or session['user_type'] != 'master': return redirect(url_for('login'))
@@ -959,4 +847,4 @@ with app.app_context():
     init_db()
     
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    app.run(host='127.0.0.1', port=5000, debug=Tr
