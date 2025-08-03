@@ -1,0 +1,28 @@
+name: Deploy to AWS Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main # Ou a branch que pretende usar para o deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Generate deployment package
+      run: zip -r deploy.zip . -x ".git*" ".github*"
+
+    - name: Deploy to Elastic Beanstalk
+      uses: einaregilsson/beanstalk-deploy@v21
+      with:
+        aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        application_name: gestaopromotora      # Substitua pelo nome da sua aplicação no EB
+        environment_name: promotora-prod     # Substitua pelo nome do seu ambiente no EB
+        version_label: ${{ github.sha }}
+        region: sa-east-1                    # Substitua pela sua região da AWS
+        deployment_package: deploy.zip
