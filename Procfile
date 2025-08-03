@@ -1,1 +1,1 @@
-web: waitress-serve --host=0.0.0.0 --port=8080 application:application
+web: waitress-serve --host=0.0.0.0 --port=8080 app:application
