@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-person-fill-gear"></i> Editar Promotora - {{ promotora.nome_completo }}</h2>
+<div class="card p-4 shadow-sm">
+    <form method="POST">
+        <div class="row g-3">
+            <div class="col-md-12">
+                <label class="form-label">Nome Completo</label>
+                <input class="form-control" name="nome_completo" value="{{ promotora.nome_completo }}" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">CPF</label>
+                <input class="form-control" name="cpf" value="{{ promotora.cpf or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Telefone (Login)</label>
+                <input class="form-control" name="telefone" value="{{ promotora.telefone }}" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Cidade</label>
+                <input class="form-control" name="cidade" value="{{ promotora.cidade or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">UF</label>
+                <input class="form-control" name="uf" value="{{ promotora.uf or '' }}" maxlength="2">
+            </div>
+            <div class="col-md-12">
+                <label class="form-label">Lojas Associadas</label>
+                <!-- SELETOR DE MÚLTIPLAS LOJAS -->
+                <select class="form-select" name="loja_ids" multiple required size="8">
+                    {% for loja in lojas %}
+                    <option value="{{ loja.id }}" {% if loja.id in lojas_associadas_ids %}selected{% endif %}>
+                        {{ loja.razao_social }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Segure Ctrl (ou Cmd em Mac) para selecionar mais de uma.</div>
+            </div>
+        </div>
+        <p class="text-body-secondary small mt-3">Nota: A senha não pode ser alterada por aqui. O padrão é sempre "hub@telefone".</p>
+        <div class="mt-4">
+            <button class="btn btn-success" type="submit"><i class="bi bi-save"></i> Salvar Alterações</button>
+            <a href="{{ url_for('gerenciamento') }}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
