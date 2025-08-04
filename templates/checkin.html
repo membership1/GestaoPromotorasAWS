@@ -9,7 +9,7 @@
         <a class="nav-link" href="{{ url_for('formulario') }}"><i class="bi bi-journal-plus"></i> Relatório Diário</a>
     </li>
     <li class="nav-item">
-        <a class="nav-link" href="{{ url_for('enviar_nota') }}"><i class="bi bi-receipt"></i> Enviar Nota Fiscal</a>
+        <a class="nav-link" href="{{ url_for('enviar_imagem') }}"><i class="bi bi-image"></i> Envio de Imagem</a>
     </li>
     <li class="nav-item">
         <a class="nav-link active" aria-current="page" href="{{ url_for('checkin') }}"><i class="bi bi-geo-alt-fill"></i> Check-in / Checkout</a>
@@ -22,7 +22,6 @@
             <input type="hidden" name="latitude" id="latitude">
             <input type="hidden" name="longitude" id="longitude">
 
-            <!-- SELETOR DE LOJA -->
             <div class="mb-3">
                 <label for="loja_id" class="form-label">Loja</label>
                 <select name="loja_id" id="loja_id" class="form-select" required>
@@ -65,7 +64,7 @@
                 <td><span class="badge text-bg-{{ 'primary' if r.tipo == 'checkin' else 'secondary' }}">{{ r.tipo.capitalize() }}</span></td>
                 <td>{{ r.data_hora }}</td>
                 <td>{{ r.razao_social }}</td>
-                <td><a href="{{ url_for('static', filename='uploads/'+r.imagem_path) }}" target="_blank">Ver</a></td>
+                <td><a href="{{ s3_location }}{{ r.imagem_path }}" target="_blank">Ver</a></td>
             </tr>
             {% endfor %}
         </tbody>

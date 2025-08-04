@@ -27,10 +27,26 @@
             </div>
             <div class="col-md-12">
                 <label class="form-label">Lojas Associadas</label>
-                <!-- SELETOR DE MÚLTIPLAS LOJAS -->
-                <select class="form-select" name="loja_ids" multiple required size="8">
+                
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-8">
+                        <select id="filtroGrupoLojas" class="form-select form-select-sm">
+                            <option value="">Filtrar por Grupo...</option>
+                            {% for grupo in grupos %}
+                            <option value="{{ grupo.id }}">{{ grupo.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-sm-4">
+                        <input type="text" id="filtroUfLojas" class="form-control form-control-sm" placeholder="Filtrar UF">
+                    </div>
+                </div>
+                <select class="form-select" name="loja_ids" multiple required size="8" id="selectLojas">
                     {% for loja in lojas %}
-                    <option value="{{ loja.id }}" {% if loja.id in lojas_associadas_ids %}selected{% endif %}>
+                    <option value="{{ loja.id }}" 
+                            data-grupo="{{ loja.grupo_id or '' }}" 
+                            data-uf="{{ loja.uf or '' }}" 
+                            {% if loja.id in lojas_associadas_ids %}selected{% endif %}>
                         {{ loja.razao_social }}
                     </option>
                     {% endfor %}
@@ -45,4 +61,48 @@
         </div>
     </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Elementos de filtro
+    const filtroGrupo = document.getElementById('filtroGrupoLojas');
+    const filtroUf = document.getElementById('filtroUfLojas');
+    
+    // O select de lojas
+    const selectLojas = document.getElementById('selectLojas');
+    
+    // Guarda uma cópia de todas as opções originais para não perder a referência
+    if (selectLojas) {
+        const todasAsLojas = Array.from(selectLojas.options);
+
+        function filtrarLojas() {
+            const grupoSelecionado = filtroGrupo.value;
+            const ufDigitado = filtroUf.value.toUpperCase().trim();
+
+            // Limpa o select para repopular com os itens filtrados
+            selectLojas.innerHTML = '';
+
+            // Itera sobre a cópia original e adiciona de volta as que correspondem aos filtros
+            todasAsLojas.forEach(function(option) {
+                const lojaGrupo = option.getAttribute('data-grupo');
+                const lojaUf = (option.getAttribute('data-uf') || '').toUpperCase();
+
+                // Verifica se a loja corresponde aos filtros selecionados
+                const matchGrupo = (grupoSelecionado === "") || (lojaGrupo === grupoSelecionado);
+                const matchUf = (ufDigitado === "") || (lojaUf === ufDigitado);
+
+                // Se corresponder, adiciona a opção de volta. A propriedade 'selected' é preservada.
+                if (matchGrupo && matchUf) {
+                    selectLojas.add(option);
+                }
+            });
+        }
+
+        // Adiciona os 'listeners' para acionar a filtragem
+        if(filtroGrupo) filtroGrupo.addEventListener('change', filtrarLojas);
+        if(filtroUf) filtroUf.addEventListener('input', filtrarLojas);
+    }
+});
+</script>
+
 {% endblock %}

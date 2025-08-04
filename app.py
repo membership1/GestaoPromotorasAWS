@@ -87,7 +87,7 @@ def init_db():
             id SERIAL PRIMARY KEY, relatorio_id INTEGER NOT NULL, campo_id INTEGER NOT NULL, valor TEXT,
             FOREIGN KEY (relatorio_id) REFERENCES relatorios(id), FOREIGN KEY (campo_id) REFERENCES campos_relatorio(id)
         );
-        CREATE TABLE IF NOT EXISTS notas_fiscais (
+        CREATE TABLE IF NOT EXISTS imagens_enviadas (
             id SERIAL PRIMARY KEY, usuario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, nota_img TEXT NOT NULL, data_hora TIMESTAMP NOT NULL,
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id), FOREIGN KEY (loja_id) REFERENCES lojas(id)
         );
@@ -207,41 +207,41 @@ def formulario():
     cursor.close()
     return render_template('formulario.html', user=user, lojas=lojas_associadas, campos=campos, loja_selecionada_id=int(loja_id_para_campos) if loja_id_para_campos else None, historico_relatorios=historico_relatorios, title="Relatório Diário")
 
-@app.route('/enviar-nota', methods=['GET', 'POST'])
-def enviar_nota():
+@app.route('/enviar-imagem', methods=['GET', 'POST'])
+def enviar_imagem():
     if 'user_type' not in session or session['user_type'] != 'promotora': return redirect(url_for('login'))
     db = get_db()
     cursor = db.cursor(cursor_factory=DictCursor)
     usuario_id = session['user_id']
     lojas_associadas = get_promotora_lojas(usuario_id)
     if not lojas_associadas:
-        flash("Você não está associada a nenhuma loja para enviar notas.", "warning")
-        return render_template('enviar_nota.html', lojas=[], notas_enviadas=[])
+        flash("Você não está associada a nenhuma loja para enviar imagens.", "warning")
+        return render_template('enviar_imagem.html', lojas=[], imagens_enviadas=[])
     if request.method == 'POST':
         loja_id_selecionada = request.form.get('loja_id')
-        nota_file = request.files.get('nota')
-        if not loja_id_selecionada or not nota_file:
+        imagem_file = request.files.get('imagem')
+        if not loja_id_selecionada or not imagem_file:
             flash("É necessário selecionar uma loja e um arquivo.", "danger")
-            return redirect(url_for('enviar_nota'))
+            return redirect(url_for('enviar_imagem'))
         cursor.execute("SELECT cnpj FROM lojas WHERE id = %s", (loja_id_selecionada,))
         loja_selecionada = cursor.fetchone()
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
         cnpj = loja_selecionada['cnpj'] if loja_selecionada and loja_selecionada['cnpj'] else 'sem_cnpj'
-        extensao = nota_file.filename.rsplit('.', 1)[1].lower()
-        novo_nome = f"notas/{cnpj}_{timestamp}.{extensao}"
-        nota_file.filename = secure_filename(novo_nome)
-        output = upload_file_to_s3(nota_file, S3_BUCKET)
+        extensao = imagem_file.filename.rsplit('.', 1)[1].lower()
+        novo_nome = f"imagens_enviadas/{cnpj}_{timestamp}.{extensao}"
+        imagem_file.filename = secure_filename(novo_nome)
+        output = upload_file_to_s3(imagem_file, S3_BUCKET)
         if "error" in output:
             flash(f"Erro ao enviar ficheiro: {output['error']}", "danger")
-            return redirect(url_for('enviar_nota'))
-        cursor.execute("INSERT INTO notas_fiscais (usuario_id, loja_id, nota_img, data_hora) VALUES (%s, %s, %s, %s)", (usuario_id, loja_id_selecionada, nota_file.filename, datetime.now()))
+            return redirect(url_for('enviar_imagem'))
+        cursor.execute("INSERT INTO imagens_enviadas (usuario_id, loja_id, nota_img, data_hora) VALUES (%s, %s, %s, %s)", (usuario_id, loja_id_selecionada, imagem_file.filename, datetime.now()))
         db.commit()
-        flash('Nota fiscal enviada com sucesso!', 'success')
-        return redirect(url_for('enviar_nota'))
-    cursor.execute("SELECT nf.*, l.razao_social FROM notas_fiscais nf JOIN lojas l ON nf.loja_id = l.id WHERE nf.usuario_id = %s ORDER BY nf.data_hora DESC", (usuario_id,))
-    notas_enviadas = cursor.fetchall()
+        flash('Imagem enviada com sucesso!', 'success')
+        return redirect(url_for('enviar_imagem'))
+    cursor.execute("SELECT i.*, l.razao_social FROM imagens_enviadas i JOIN lojas l ON i.loja_id = l.id WHERE i.usuario_id = %s ORDER BY i.data_hora DESC", (usuario_id,))
+    imagens_enviadas = cursor.fetchall()
     cursor.close()
-    return render_template('enviar_nota.html', lojas=lojas_associadas, notas_enviadas=notas_enviadas, s3_location=S3_LOCATION, title="Enviar Nota Fiscal")
+    return render_template('enviar_imagem.html', lojas=lojas_associadas, imagens_enviadas=imagens_enviadas, s3_location=S3_LOCATION, title="Enviar Imagem")
 
 @app.route('/checkin', methods=['GET', 'POST'])
 def checkin():
@@ -384,16 +384,25 @@ def detalhe_grupo(id):
 
 @app.route('/admin/grupo/<int:id>/campo/add', methods=['POST'])
 def add_campo(id):
-    if 'user_type' not in session or session['user_type'] != 'master': return redirect(url_for('login'))
+    if 'user_type' not in session or session['user_type'] != 'master':
+        return redirect(url_for('login'))
+
     label_campo = request.form.get('label_campo')
+    tipo = request.form.get('tipo', 'texto')
+    tamanho = int(request.form.get('tamanho', 200))
+
     if label_campo:
         nome_campo = label_campo.lower().replace(" ", "_")
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("INSERT INTO campos_relatorio (grupo_id, nome_campo, label_campo) VALUES (%s, %s, %s)", (id, nome_campo, label_campo))
+        cursor.execute("""
+            INSERT INTO campos_relatorio (grupo_id, nome_campo, label_campo, tipo, tamanho)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (id, nome_campo, label_campo, tipo, tamanho))
         db.commit()
         cursor.close()
-        flash(f"Campo '{label_campo}' adicionado.", "success")
+        flash(f"Campo '{label_campo}' adicionado com sucesso.", "success")
+    
     return redirect(url_for('detalhe_grupo', id=id))
 
 @app.route('/admin/grupo/campo/delete/<int:campo_id>', methods=['POST'])
@@ -659,15 +668,24 @@ def exportar_historico_checkin():
     return send_file(output, as_attachment=True, download_name=f'historico_checkins_{filtros["data_inicio"]}_a_{filtros["data_fim"]}.xlsx')
 
 @app.route('/api/grupo/<int:grupo_id>/campos')
-def api_get_campos_grupo(grupo_id):
-    if 'user_type' not in session or session['user_type'] != 'master':
-        return jsonify({'error': 'Não autorizado'}), 403
+def api_campos_grupo(grupo_id):
     db = get_db()
-    cursor = db.cursor(cursor_factory=DictCursor)
-    cursor.execute("SELECT id, label_campo FROM campos_relatorio WHERE grupo_id = %s", (grupo_id,))
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT id, label_campo, tipo, tamanho
+        FROM campos_relatorio
+        WHERE grupo_id = %s
+        ORDER BY id
+    """, (grupo_id,))
     campos = cursor.fetchall()
     cursor.close()
-    return jsonify([dict(c) for c in campos])
+    db.close()
+
+    return jsonify([
+        {"id": c[0], "label_campo": c[1], "tipo": c[2], "tamanho": c[3]}
+        for c in campos
+    ])
+
 
 @app.route('/admin/performance', methods=['GET', 'POST'])
 def performance():
@@ -813,11 +831,13 @@ def edit_promotora(id):
     promotora = cursor.fetchone()
     cursor.execute("SELECT * FROM lojas ORDER BY razao_social")
     lojas = cursor.fetchall()
+    cursor.execute("SELECT * FROM grupos ORDER BY nome")
+    grupos = cursor.fetchall()
     cursor.execute("SELECT loja_id FROM promotora_lojas WHERE usuario_id = %s", (id,))
     lojas_associadas_raw = cursor.fetchall()
     lojas_associadas_ids = [item['loja_id'] for item in lojas_associadas_raw]
     cursor.close()
-    return render_template('edit_promotora.html', promotora=promotora, lojas=lojas, lojas_associadas_ids=lojas_associadas_ids)
+    return render_template('edit_promotora.html', promotora=promotora, lojas=lojas, lojas_associadas_ids=lojas_associadas_ids, grupos=grupos)
 
 @app.route('/admin/promotora/toggle/<int:id>', methods=['POST'])
 def toggle_active_promotora(id):
@@ -835,6 +855,42 @@ def toggle_active_promotora(id):
         flash("Status da promotora atualizado.", "success")
     cursor.close()
     return redirect(url_for('gerenciamento'))
+
+@app.route("/relatorios_avancados/<int:grupo_id>")
+def relatorios_avancados(grupo_id):
+    db = get_db()
+    cursor = db.cursor()
+
+    # Buscar campos numéricos
+    cursor.execute("SELECT id, label_campo FROM campos_relatorio WHERE grupo_id = %s AND tipo = 'numero' ORDER BY id", (grupo_id,))
+    campos_numericos = [{"id": r[0], "label_campo": r[1]} for r in cursor.fetchall()]
+
+    # Buscar campos de texto
+    cursor.execute("SELECT id, label_campo FROM campos_relatorio WHERE grupo_id = %s AND tipo = 'texto' ORDER BY id", (grupo_id,))
+    campos_texto = [{"id": r[0], "label_campo": r[1]} for r in cursor.fetchall()]
+
+    cursor.close()
+    db.close()
+
+    return render_template("relatorios.html", campos_numericos=campos_numericos, campos_texto=campos_texto)
+
+
+@app.route("/processar_relatorio", methods=["POST"])
+def processar_relatorio():
+    campo_id = request.form.get("campo_calculo")
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT tipo FROM campos_relatorio WHERE id = %s", (campo_id,))
+    tipo = cursor.fetchone()
+    cursor.close()
+    db.close()
+
+    if not tipo or tipo[0] != "numero":
+        flash("O campo selecionado não é numérico e não pode ser usado em cálculos.", "danger")
+        return redirect(url_for("relatorios_avancados", grupo_id=1))  # Ajustar ID conforme necessidade
+
+    flash("Relatório processado com sucesso!", "success")
+    return redirect(url_for("relatorios_avancados", grupo_id=1))
 
 @app.route('/logout')
 def logout():

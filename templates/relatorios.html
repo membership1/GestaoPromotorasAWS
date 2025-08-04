@@ -105,12 +105,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function carregarCampos() {
         const grupoId = grupoSelect.value;
         camposContainer.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Carregando...</span></div>';
-
+    
         if (!grupoId) {
             camposContainer.innerHTML = '<small class="text-body-secondary">Selecione um grupo para carregar os campos.</small>';
             return;
         }
-
+    
         fetch(`/api/grupo/${grupoId}/campos`)
             .then(response => response.json())
             .then(campos => {
@@ -118,14 +118,57 @@ document.addEventListener('DOMContentLoaded', function() {
                     camposContainer.innerHTML = '<small class="text-body-secondary">Este grupo não possui campos.</small>';
                     return;
                 }
-                let html = `<table class="table table-dark table-striped table-sm align-middle mb-0"><thead><tr><th>Campo</th><th class="text-center">Total</th><th class="text-center">Média</th></tr></thead><tbody>`;
-                const filtrosAtuais = new URLSearchParams(window.location.search);
-                campos.forEach(campo => {
-                    const totalChecked = filtrosAtuais.getAll('campos').includes(`${campo.id}_total`) ? 'checked' : '';
-                    const mediaChecked = filtrosAtuais.getAll('campos').includes(`${campo.id}_media`) ? 'checked' : '';
-                    html += `<tr><td class="fw-bold">${campo.label_campo}</td><td class="text-center"><input type="checkbox" name="campos" value="${campo.id}_total" ${totalChecked}></td><td class="text-center"><input type="checkbox" name="campos" value="${campo.id}_media" ${mediaChecked}></td></tr>`;
-                });
-                html += `</tbody></table>`;
+    
+                // Filtrar campos numéricos e campos texto
+                const camposNumericos = campos.filter(c => c.tipo === 'numero');
+                const camposTexto = campos.filter(c => c.tipo === 'texto');
+    
+                let html = "";
+    
+                // Campos numéricos com checkboxes
+                if (camposNumericos.length > 0) {
+                    html += `<h6 class="fw-bold mb-2">Campos Numéricos (Calculáveis)</h6>`;
+                    html += `<table class="table table-dark table-striped table-sm align-middle mb-3">
+                                <thead>
+                                    <tr>
+                                        <th>Campo</th>
+                                        <th class="text-center">Total</th>
+                                        <th class="text-center">Média</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                    const filtrosAtuais = new URLSearchParams(window.location.search);
+                    camposNumericos.forEach(campo => {
+                        const totalChecked = filtrosAtuais.getAll('campos').includes(`${campo.id}_total`) ? 'checked' : '';
+                        const mediaChecked = filtrosAtuais.getAll('campos').includes(`${campo.id}_media`) ? 'checked' : '';
+                        html += `<tr>
+                                    <td class="fw-bold">${campo.label_campo}</td>
+                                    <td class="text-center">
+                                        <input type="checkbox" name="campos" value="${campo.id}_total" ${totalChecked}>
+                                    </td>
+                                    <td class="text-center">
+                                        <input type="checkbox" name="campos" value="${campo.id}_media" ${mediaChecked}>
+                                    </td>
+                                 </tr>`;
+                    });
+                    html += `</tbody></table>`;
+                } else {
+                    html += `<p class="text-muted">Nenhum campo numérico disponível.</p>`;
+                }
+    
+                // Campos de texto listados separadamente
+                if (camposTexto.length > 0) {
+                    html += `<h6 class="fw-bold mt-3 mb-2">Campos de Texto (Não calculáveis)</h6>`;
+                    html += `<ul class="list-group">`;
+                    camposTexto.forEach(campo => {
+                        html += `<li class="list-group-item d-flex justify-content-between align-items-center">
+                                    ${campo.label_campo}
+                                    <span class="badge bg-secondary">Texto</span>
+                                 </li>`;
+                    });
+                    html += `</ul>`;
+                }
+    
                 camposContainer.innerHTML = html;
             });
     }
