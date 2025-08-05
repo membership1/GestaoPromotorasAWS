@@ -5,28 +5,38 @@ EMAIL="kleber.andrade@gmail.com"
 DOMAIN1="gestaopromo.com.br"
 DOMAIN2="www.gestaopromo.com.br"
 
-echo "=== Habilitando repositórios CodeReady Builder e EPEL para Amazon Linux 2023 ==="
-# Habilita o repositório CRB que contém dependências para o EPEL
-sudo dnf config-manager --set-enabled codeready-builder-for-rhel-9-x86_64-rpms
+# --- Nova Abordagem: Instalação Autocontida do Certbot com pip ---
+echo "=== Preparando uma instalação autocontida do Certbot ==="
 
-# Instala o pacote de release do EPEL. A flag --allowerasing ajuda com conflitos.
-sudo dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm -y --allowerasing
+# 1. Cria um ambiente virtual para o Certbot não interferir com a aplicação
+sudo python3 -m venv /opt/certbot/
+# 2. Ativa o ambiente e instala o Certbot usando pip
+sudo /opt/certbot/venv/bin/pip install --upgrade pip
+sudo /opt/certbot/venv/bin/pip install certbot
 
-echo "=== Instalando Certbot e o plugin para Nginx ==="
-sudo dnf install -y certbot python3-certbot-nginx
+# 3. Cria um link simbólico para facilitar a execução do comando
+sudo ln -s /opt/certbot/venv/bin/certbot /usr/bin/certbot
 
 echo "=== Gerando certificado Let's Encrypt ==="
-# Verifica se o certificado já existe para evitar atingir limites de taxa
+# Verifica se o certificado já existe para evitar atingir os limites de solicitação
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN1" ]; then
-    # O plugin --nginx modifica a configuração do Nginx automaticamente para a validação.
-    sudo certbot --nginx --non-interactive --agree-tos \
+    echo "Certificado não encontrado. Obtendo um novo certificado..."
+    # Para o Nginx temporariamente para liberar a porta 80 para a validação
+    sudo systemctl stop nginx || true
+    
+    # Executa o Certbot no modo 'standalone'
+    sudo certbot certonly --non-interactive --agree-tos \
         --email "$EMAIL" \
+        --standalone \
         -d "$DOMAIN1" -d "$DOMAIN2"
+        
+    # Inicia o Nginx novamente
+    sudo systemctl start nginx || true
 else
-    echo "Certificado já existe, pulando a criação."
+    echo "Certificado já existe. Pulando a criação."
 fi
 
 echo "=== Ajustando permissões finais ==="
 sudo chmod -R 755 /etc/letsencrypt/
 
-echo "=== SSL configurado com sucesso! O Elastic Beanstalk reiniciará o Nginx. ==="
+echo "=== Script de SSL concluído com sucesso! ==="
