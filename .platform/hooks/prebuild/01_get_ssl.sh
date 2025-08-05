@@ -6,8 +6,7 @@ DOMAIN1="gestaopromo.com.br"
 DOMAIN2="www.gestaopromo.com.br"
 
 echo "=== Instalando Certbot ==="
-sudo yum install -y epel-release
-sudo amazon-linux-extras enable epel
+sudo amazon-linux-extras install -y epel
 sudo yum install -y certbot
 
 echo "=== Gerando certificado Let's Encrypt ==="
