@@ -22,8 +22,8 @@ jobs:
         use_existing_version_if_available: true            
         aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        application_name: gestaopromotora      # Substitua pelo nome da sua aplicação no EB
-        environment_name: promotora-prod     # Substitua pelo nome do seu ambiente no EB
+        application_name: gestaopromo      # Substitua pelo nome da sua aplicação no EB
+        environment_name: Gestaopromo-prd     # Substitua pelo nome do seu ambiente no EB
         version_label: ${{ github.sha }}
         region: sa-east-1                    # Substitua pela sua região da AWS
         deployment_package: deploy.zip
