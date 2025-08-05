@@ -1,45 +1,33 @@
 #!/bin/bash
-set -e
+set -ex
 
 EMAIL="kleber.andrade@gmail.com"
 DOMAIN1="gestaopromo.com.br"
 DOMAIN2="www.gestaopromo.com.br"
 
-echo "=== Instalando dependências para o ambiente virtual do Certbot (AL2023) ==="
-# CORREÇÃO: Usa o nome de pacote correto para Python 3.11 no Amazon Linux 2023
-sudo dnf install -y python3.11-venv gcc python3.11-devel
+echo "=== Instalando dependências via DNF ==="
+# Instala o PIP para Python 3, e ferramentas de desenvolvimento que o Certbot pode precisar
+sudo dnf install -y python3-pip gcc python3-devel
 
-echo "=== Preparando uma instalação autocontida do Certbot ==="
-# 1. Cria um ambiente virtual para o Certbot
-sudo python3 -m venv /opt/certbot_venv
-
-# 2. Ativa o ambiente e instala o Certbot usando pip
-sudo /opt/certbot_venv/bin/pip install --upgrade pip
-sudo /opt/certbot_venv/bin/pip install certbot
-
-# 3. Cria um link simbólico para facilitar a execução do comando
-sudo ln -sf /opt/certbot_venv/bin/certbot /usr/bin/certbot
+echo "=== Instalando Certbot e o plugin do Nginx via PIP (System-wide) ==="
+# Como o venv não está disponível, instalamos diretamente no sistema
+sudo pip3 install certbot certbot-nginx
 
 echo "=== Gerando certificado Let's Encrypt ==="
 # Verifica se o certificado já existe
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN1" ]; then
     echo "Certificado não encontrado. Obtendo um novo certificado..."
-    # Para o Nginx temporariamente para liberar a porta 80 para a validação
-    sudo systemctl stop nginx || true
     
-    # Executa o Certbot no modo 'standalone'
-    sudo certbot certonly --non-interactive --agree-tos \
+    # Executa o Certbot com o plugin do Nginx
+    # O plugin vai encontrar a configuração do Nginx e modificá-la automaticamente
+    # para a validação e instalação do certificado.
+    sudo certbot --nginx --non-interactive --agree-tos \
         --email "$EMAIL" \
-        --standalone \
         -d "$DOMAIN1" -d "$DOMAIN2"
-        
-    # Inicia o Nginx novamente
-    sudo systemctl start nginx || true
 else
-    echo "Certificado já existe. Pulando a criação."
+    echo "Certificado já existe. Garantindo que está renovado e reinstalado."
+    # O comando renew garante que o certificado está válido.
+    sudo certbot renew --quiet
 fi
 
-echo "=== Ajustando permissões finais ==="
-sudo chmod -R 755 /etc/letsencrypt/
-
-echo "=== Script de SSL concluído com sucesso! ==="
+echo "=== Script de SSL concluído com sucesso! O Nginx será reiniciado pelo Elastic Beanstalk. ==="
