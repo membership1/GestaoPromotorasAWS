@@ -16,7 +16,7 @@ fi
 
 echo "=== Preparando o diretório webroot para validação ==="
 sudo mkdir -p $WEBROOT_PATH
-sudo chown -R ec2-user:webapp $WEBROOT_PATH # Garante que o Nginx possa ler
+sudo chown -R ec2-user:webapp $WEBROOT_PATH # Garante que o Nginx (webapp user) possa ler
 sudo chmod -R 755 $WEBROOT_PATH
 
 echo "=== Gerando/Renovando certificado Let's Encrypt (modo Webroot) ==="
